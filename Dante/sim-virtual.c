@@ -1,6 +1,4 @@
-// sim-virtual.c
-// Alunos: Nome1 e Nome2
-// INF1316 - Trabalho 2 - Simulador de Memória Virtual
+// Alunos: Dante Navaza 2321406 e Marcela Issa 2310746
 
 #include <stdio.h>
 #include <stdlib.h>
