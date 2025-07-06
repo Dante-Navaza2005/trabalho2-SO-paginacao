@@ -5,210 +5,178 @@
 #include <string.h>
 #include <math.h>
 
-#define MAX_FRAMES 262144
-#define MAX_LINE 100
-#define MAX_ACESSOS 1000000
+#define QuadrosMaximo 262144
+#define LinhaMaxima 100
+#define AcessosMaximo 1000000
 
 typedef struct {
-    int page_number;
-    int R;
-    int M;
-    unsigned long last_access_time;
-    int valid;
-} Frame;
+    int pagina;
+    int r;
+    int m;
+    unsigned long acesso;
+    int valido;
+} Quadro;
 
-Frame *frames;
-unsigned int num_frames;
-unsigned int page_size_kb;
-unsigned int mem_size_mb;
-unsigned long time_counter = 0;
-unsigned long page_faults = 0;
-unsigned long dirty_writes = 0;
+Quadro* todosquadros;
+unsigned int totalquadros;
+unsigned int tamanhopagina;
+unsigned int memoriafisica;
+unsigned long tempoagora = 0;
+unsigned long faltapagina = 0;
+unsigned long paginasmodificadas = 0;
 
-char algoritmo[20];
-int ponteiro_clock = 0;
-unsigned int acessos[MAX_ACESSOS];
-int total_acessos = 0;
-int posicao_atual = 0;
+char metodo[20];
+int ponteiroatual = 0;
+unsigned int listaacessos[AcessosMaximo];
+int acessostotal = 0;
+int posicaoatual = 0;
 
-int encontrar_pagina(int page);
-int substituir_pagina(int page);
-int get_free_frame();
-int escolher_vitima_lru();
-int escolher_vitima_segunda_chance();
-int escolher_vitima_clock();
-int escolher_vitima_otima();
-unsigned int get_page(unsigned int addr);
-
-int main(int argc, char *argv[]) {
-    if (argc != 5) {
-        printf("Uso: %s algoritmo arquivo.log tamanho_pagina_KB tamanho_memoria_MB\n", argv[0]);
-        return 1;
-    }
-
-    printf("prompt> sim-virtual %s %s %s %s\n", argv[1], argv[2], argv[3], argv[4]);
-    printf("Executando o simulador...\n");
-
-    strcpy(algoritmo, argv[1]);
-    FILE *file = fopen(argv[2], "r");
-    page_size_kb = atoi(argv[3]);
-    mem_size_mb = atoi(argv[4]);
-
-    if (!file) {
-        perror("Erro ao abrir arquivo de entrada");
-        return 1;
-    }
-
-    int s = (int)log2(page_size_kb * 1024);
-
-    if (strcmp(algoritmo, "otimo") == 0) {
-        unsigned int end_temp;
-        char rw_temp;
-        while (fscanf(file, "%x %c", &end_temp, &rw_temp) != EOF && total_acessos < MAX_ACESSOS) {
-            acessos[total_acessos++] = end_temp >> s;
+int escolherpagina(char* metodoatual, unsigned int* acessosdados) {
+    if (strcmp(metodoatual, "LRU") == 0 || (strcmp(metodoatual, "lru") == 0)){
+        int menor = 0;
+        for (int i = 1; i < totalquadros; i++) {
+            if (todosquadros[i].acesso < todosquadros[menor].acesso) menor = i;
         }
-        rewind(file);
+        return menor;
     }
 
-    num_frames = (mem_size_mb * 1024) / page_size_kb;
-    frames = (Frame *)malloc(sizeof(Frame) * num_frames);
-    for (int i = 0; i < num_frames; i++) frames[i].valid = 0;
-
-    unsigned int addr;
-    char rw;
-
-    while (fscanf(file, "%x %c", &addr, &rw) != EOF) {
-        unsigned int page = addr >> s;
-        int frame_index = encontrar_pagina(page);
-        time_counter++;
-
-        if (frame_index != -1) {
-            frames[frame_index].R = 1;
-            if (rw == 'W') frames[frame_index].M = 1;
-            frames[frame_index].last_access_time = time_counter;
-        } else {
-            page_faults++;
-            int target = get_free_frame();
-            if (target == -1) {
-                target = substituir_pagina(page);
+    if (strcmp(metodoatual, "2nd") == 0) {
+        static int pos = 0;
+        while (1) {
+            if (!todosquadros[pos].r) {
+                int escolhido = pos;
+                pos = (pos + 1) % totalquadros;
+                return escolhido;
+            } else {
+                todosquadros[pos].r = 0;
+                pos = (pos + 1) % totalquadros;
             }
-            if (frames[target].valid && frames[target].M) dirty_writes++;
-
-            frames[target].page_number = page;
-            frames[target].R = 1;
-            frames[target].M = (rw == 'W') ? 1 : 0;
-            frames[target].last_access_time = time_counter;
-            frames[target].valid = 1;
-        }
-
-        if (strcmp(algoritmo, "otimo") == 0 && posicao_atual < total_acessos)
-            posicao_atual++;
-    }
-
-    fclose(file);
-
-    printf("Arquivo de entrada: %s\n", argv[2]);
-    printf("Tamanho da memoria fisica: %u MB\n", mem_size_mb);
-    printf("Tamanho das páginas: %u KB\n", page_size_kb);
-    printf("Algoritmo de substituição: %s\n", algoritmo);
-    printf("Número de Faltas de Páginas: %lu\n", page_faults);
-    printf("Número de Páginas Escritas: %lu\n", dirty_writes);
-
-    free(frames);
-    return 0;
-}
-
-int encontrar_pagina(int page) {
-    for (int i = 0; i < num_frames; i++) {
-        if (frames[i].valid && frames[i].page_number == page)
-            return i;
-    }
-    return -1;
-}
-
-int substituir_pagina(int page) {
-    if (strcmp(algoritmo, "LRU") == 0) {
-        return escolher_vitima_lru();
-    } else if (strcmp(algoritmo, "2nd") == 0) {
-        return escolher_vitima_segunda_chance();
-    } else if (strcmp(algoritmo, "clock") == 0) {
-        return escolher_vitima_clock();
-    } else if (strcmp(algoritmo, "otimo") == 0) {
-        return escolher_vitima_otima();
-    } else {
-        printf("Algoritmo %s não implementado ainda.\n", algoritmo);
-        exit(1);
-    }
-}
-
-int get_free_frame() {
-    for (int i = 0; i < num_frames; i++) {
-        if (!frames[i].valid) return i;
-    }
-    return -1;
-}
-
-int escolher_vitima_lru() {
-    int menor = 0;
-    for (int i = 1; i < num_frames; i++) {
-        if (frames[i].last_access_time < frames[menor].last_access_time) {
-            menor = i;
         }
     }
-    return menor;
-}
 
-int escolher_vitima_segunda_chance() {
-    static int pos = 0;
-    while (1) {
-        if (!frames[pos].R) {
-            int escolhido = pos;
-            pos = (pos + 1) % num_frames;
-            return escolhido;
-        } else {
-            frames[pos].R = 0;
-            pos = (pos + 1) % num_frames;
+    if (strcmp(metodoatual, "clock") == 0) {
+        while (1) {
+            if (!todosquadros[ponteiroatual].r) {
+                int escolhido = ponteiroatual;
+                ponteiroatual = (ponteiroatual + 1) % totalquadros;
+                return escolhido;
+            } else {
+                todosquadros[ponteiroatual].r = 0;
+                ponteiroatual = (ponteiroatual + 1) % totalquadros;
+            }
         }
     }
-}
 
-int escolher_vitima_clock() {
-    while (1) {
-        if (!frames[ponteiro_clock].R) {
-            int escolhido = ponteiro_clock;
-            ponteiro_clock = (ponteiro_clock + 1) % num_frames;
-            return escolhido;
-        } else {
-            frames[ponteiro_clock].R = 0;
-            ponteiro_clock = (ponteiro_clock + 1) % num_frames;
+    if (strcmp(metodoatual, "otimo") == 0) {
+        int maislonge = -1;
+        int indice = -1;
+        for (int i = 0; i < totalquadros; i++) {
+            int proximo = -1;
+            for (int j = posicaoatual; j < acessostotal; j++) {
+                if (acessosdados[j] == todosquadros[i].pagina) {
+                    proximo = j;
+                    break;
+                }
+            }
+            if (proximo == -1) return i;
+            if (proximo > maislonge) {
+                maislonge = proximo;
+                indice = i;
+            }
         }
+        return indice;
     }
+
+    printf("Metodo %s nao reconhecido\n", metodoatual);
+    exit(1);
 }
 
-int escolher_vitima_otima() {
-    int mais_longe = -1;
-    int indice_escolhido = -1;
+int main(int quantidadeargumentos, char* argumentos[]) {
+    if (quantidadeargumentos != 5) {
+        printf("Uso correto: %s metodo arquivo tamanhopagina memoria\n", argumentos[0]);
+        return 1;
+    }
 
-    for (int i = 0; i < num_frames; i++) {
-        int proximo_uso = -1;
-        for (int j = posicao_atual; j < total_acessos; j++) {
-            if (acessos[j] == frames[i].page_number) {
-                proximo_uso = j;
+    printf("prompt> sim-virtual %s %s %s %s\n", argumentos[1], argumentos[2], argumentos[3], argumentos[4]);
+    printf("Executando simulador...\n");
+
+    strcpy(metodo, argumentos[1]);
+    FILE* arquivo = fopen(argumentos[2], "r");
+    tamanhopagina = atoi(argumentos[3]);
+    memoriafisica = atoi(argumentos[4]);
+
+    if (!arquivo) {
+        perror("Erro ao abrir o arquivo");
+        return 1;
+    }
+
+    int deslocamento = (int)log2(tamanhopagina * 1024);
+
+    if (strcmp(metodo, "otimo") == 0) {
+        unsigned int temporario;
+        char tipo;
+        while (fscanf(arquivo, "%x %c", &temporario, &tipo) != EOF && acessostotal < AcessosMaximo) {
+            listaacessos[acessostotal++] = temporario >> deslocamento;
+        }
+        rewind(arquivo);
+    }
+
+    totalquadros = (memoriafisica * 1024) / tamanhopagina;
+    todosquadros = malloc(sizeof(Quadro) * totalquadros);
+    for (int i = 0; i < totalquadros; i++) todosquadros[i].valido = 0;
+
+    unsigned int endereco;
+    char acao;
+
+    while (fscanf(arquivo, "%x %c", &endereco, &acao) != EOF) {
+        unsigned int pag = endereco >> deslocamento;
+        tempoagora++;
+
+        int quadroencontrado = -1;
+        for (int i = 0; i < totalquadros; i++) {
+            if (todosquadros[i].valido && todosquadros[i].pagina == pag) {
+                quadroencontrado = i;
                 break;
             }
         }
-        if (proximo_uso == -1) {
-            return i;
-        }
-        if (proximo_uso > mais_longe) {
-            mais_longe = proximo_uso;
-            indice_escolhido = i;
-        }
-    }
-    return indice_escolhido;
-}
 
-unsigned int get_page(unsigned int addr) {
-    int s = (int)log2(page_size_kb * 1024);
-    return addr >> s;
+        if (quadroencontrado != -1) {
+            todosquadros[quadroencontrado].r = 1;
+            if (acao == 'W') todosquadros[quadroencontrado].m = 1;
+            todosquadros[quadroencontrado].acesso = tempoagora;
+        } else {
+            faltapagina++;
+
+            int posicaovazia = -1;
+            for (int i = 0; i < totalquadros; i++) {
+                if (!todosquadros[i].valido) {
+                    posicaovazia = i;
+                    break;
+                }
+            }
+
+            if (posicaovazia == -1) posicaovazia = escolherpagina(metodo, listaacessos);
+            if (todosquadros[posicaovazia].valido && todosquadros[posicaovazia].m) paginasmodificadas++;
+
+            todosquadros[posicaovazia].pagina = pag;
+            todosquadros[posicaovazia].r = 1;
+            todosquadros[posicaovazia].m = (acao == 'W');
+            todosquadros[posicaovazia].acesso = tempoagora;
+            todosquadros[posicaovazia].valido = 1;
+        }
+
+        if (strcmp(metodo, "otimo") == 0 && posicaoatual < acessostotal) posicaoatual++;
+    }
+
+    fclose(arquivo);
+
+    printf("Arquivo de entrada: %s\n", argumentos[2]);
+    printf("Tamanho da memória fisica: %u MB\n", memoriafisica);
+    printf("Tamanho das páginas: %u KB\n", tamanhopagina);
+    printf("Algoritmo de substituição: %s\n", metodo);
+    printf("Número de Falta de Páginas: %lu\n", faltapagina);
+    printf("Número de Páginas Escritas: %lu\n", paginasmodificadas);
+
+    free(todosquadros);
+    return 0;
 }
