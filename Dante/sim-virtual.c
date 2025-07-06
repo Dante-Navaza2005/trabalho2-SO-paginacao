@@ -31,64 +31,69 @@ unsigned int listaacessos[AcessosMaximo];
 int acessostotal = 0;
 int posicaoatual = 0;
 
-int escolherpagina(char* metodoatual, unsigned int* acessosdados) {
-    if (strcmp(metodoatual, "LRU") == 0 || (strcmp(metodoatual, "lru") == 0)){
-        int menor = 0;
-        for (int i = 1; i < totalquadros; i++) {
-            if (todosquadros[i].acesso < todosquadros[menor].acesso) menor = i;
-        }
-        return menor;
+int escolherpaginaLRU() {
+    int menor = 0;
+    for (int i = 1; i < totalquadros; i++) {
+        if (todosquadros[i].acesso < todosquadros[menor].acesso) menor = i;
     }
+    return menor;
+}
 
-    if (strcmp(metodoatual, "2nd") == 0) {
-        static int pos = 0;
-        while (1) {
-            if (!todosquadros[pos].r) {
-                int escolhido = pos;
-                pos = (pos + 1) % totalquadros;
-                return escolhido;
-            } else {
-                todosquadros[pos].r = 0;
-                pos = (pos + 1) % totalquadros;
-            }
+int escolherpaginaSegundo() {
+    static int pos = 0;
+    while (1) {
+        if (!todosquadros[pos].r) {
+            int escolhido = pos;
+            pos = (pos + 1) % totalquadros;
+            return escolhido;
+        } else {
+            todosquadros[pos].r = 0;
+            pos = (pos + 1) % totalquadros;
         }
     }
+}
 
-    if (strcmp(metodoatual, "clock") == 0) {
-        while (1) {
-            if (!todosquadros[ponteiroatual].r) {
-                int escolhido = ponteiroatual;
-                ponteiroatual = (ponteiroatual + 1) % totalquadros;
-                return escolhido;
-            } else {
-                todosquadros[ponteiroatual].r = 0;
-                ponteiroatual = (ponteiroatual + 1) % totalquadros;
-            }
+int escolherpaginaClock() {
+    while (1) {
+        if (!todosquadros[ponteiroatual].r) {
+            int escolhido = ponteiroatual;
+            ponteiroatual = (ponteiroatual + 1) % totalquadros;
+            return escolhido;
+        } else {
+            todosquadros[ponteiroatual].r = 0;
+            ponteiroatual = (ponteiroatual + 1) % totalquadros;
         }
     }
+}
 
-    if (strcmp(metodoatual, "otimo") == 0) {
-        int maislonge = -1;
-        int indice = -1;
-        for (int i = 0; i < totalquadros; i++) {
-            int proximo = -1;
-            for (int j = posicaoatual; j < acessostotal; j++) {
-                if (acessosdados[j] == todosquadros[i].pagina) {
-                    proximo = j;
-                    break;
-                }
-            }
-            if (proximo == -1) return i;
-            if (proximo > maislonge) {
-                maislonge = proximo;
-                indice = i;
+int escolherpaginaOtimo() {
+    int maislonge = -1;
+    int indice = -1;
+    for (int i = 0; i < totalquadros; i++) {
+        int proximo = -1;
+        for (int j = posicaoatual; j < acessostotal; j++) {
+            if (listaacessos[j] == todosquadros[i].pagina) {
+                proximo = j;
+                break;
             }
         }
-        return indice;
+        if (proximo == -1) return i;
+        if (proximo > maislonge) {
+            maislonge = proximo;
+            indice = i;
+        }
     }
+    return indice;
+}
 
-    printf("Metodo %s nao reconhecido\n", metodoatual);
-    exit(1);
+int convertervalor(char* texto) {
+    char* fim;
+    long valor = strtol(texto, &fim, 10);
+    if (*fim != '\0' || valor < 0) {
+        printf("Valor inválido: %s\n", texto);
+        exit(1);
+    }
+    return (int)valor;
 }
 
 int main(int quantidadeargumentos, char* argumentos[]) {
@@ -101,10 +106,11 @@ int main(int quantidadeargumentos, char* argumentos[]) {
     printf("Executando simulador...\n");
 
     strcpy(metodo, argumentos[1]);
-    FILE* arquivo = fopen(argumentos[2], "r");
-    tamanhopagina = atoi(argumentos[3]);
-    memoriafisica = atoi(argumentos[4]);
+    tamanhopagina = convertervalor(argumentos[3]);
+    memoriafisica = convertervalor(argumentos[4]);
+    totalquadros = (memoriafisica * 1024) / tamanhopagina;
 
+    FILE* arquivo = fopen(argumentos[2], "r");
     if (!arquivo) {
         perror("Erro ao abrir o arquivo");
         return 1;
@@ -113,23 +119,27 @@ int main(int quantidadeargumentos, char* argumentos[]) {
     int deslocamento = (int)log2(tamanhopagina * 1024);
 
     if (strcmp(metodo, "otimo") == 0) {
-        unsigned int temporario;
+        unsigned int endereco;
         char tipo;
-        while (fscanf(arquivo, "%x %c", &temporario, &tipo) != EOF && acessostotal < AcessosMaximo) {
-            listaacessos[acessostotal++] = temporario >> deslocamento;
+        while (fscanf(arquivo, "%x %c", &endereco, &tipo) != EOF && acessostotal < AcessosMaximo) {
+            listaacessos[acessostotal++] = endereco >> deslocamento;
         }
-        rewind(arquivo);
+        fclose(arquivo);
+        arquivo = fopen(argumentos[2], "r");
+        if (!arquivo) {
+            perror("Erro ao reabrir o arquivo");
+            return 1;
+        }
     }
 
-    totalquadros = (memoriafisica * 1024) / tamanhopagina;
     todosquadros = malloc(sizeof(Quadro) * totalquadros);
     for (int i = 0; i < totalquadros; i++) todosquadros[i].valido = 0;
 
-    unsigned int endereco;
+    unsigned int addr;
     char acao;
 
-    while (fscanf(arquivo, "%x %c", &endereco, &acao) != EOF) {
-        unsigned int pag = endereco >> deslocamento;
+    while (fscanf(arquivo, "%x %c", &addr, &acao) != EOF) {
+        unsigned int pag = addr >> deslocamento;
         tempoagora++;
 
         int quadroencontrado = -1;
@@ -155,7 +165,21 @@ int main(int quantidadeargumentos, char* argumentos[]) {
                 }
             }
 
-            if (posicaovazia == -1) posicaovazia = escolherpagina(metodo, listaacessos);
+            if (posicaovazia == -1) {
+                if (strcmp(metodo, "LRU") == 0 || strcmp(metodo, "lru") == 0)
+                    posicaovazia = escolherpaginaLRU();
+                else if (strcmp(metodo, "2nd") == 0)
+                    posicaovazia = escolherpaginaSegundo();
+                else if (strcmp(metodo, "clock") == 0)
+                    posicaovazia = escolherpaginaClock();
+                else if (strcmp(metodo, "otimo") == 0)
+                    posicaovazia = escolherpaginaOtimo();
+                else {
+                    printf("Metodo %s nao reconhecido\n", metodo);
+                    exit(1);
+                }
+            }
+
             if (todosquadros[posicaovazia].valido && todosquadros[posicaovazia].m) paginasmodificadas++;
 
             todosquadros[posicaovazia].pagina = pag;
